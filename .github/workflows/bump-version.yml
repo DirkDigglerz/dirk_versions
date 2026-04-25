@@ -1,0 +1,57 @@
+name: Bump version
+
+# Triggered by `repository_dispatch` from a consumer repo's release workflow.
+# Payload:
+#   { "resource": "dirk_fishing", "version": "2.0.11" }
+on:
+  repository_dispatch:
+    types: [bump-version]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate payload
+        env:
+          RESOURCE: ${{ github.event.client_payload.resource }}
+          VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          if [ -z "$RESOURCE" ] || [ -z "$VERSION" ]; then
+            echo "::error::missing resource or version in payload"
+            exit 1
+          fi
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version '$VERSION' is not semver (X.Y.Z)"
+            exit 1
+          fi
+
+      - name: Update versions.json
+        env:
+          RESOURCE: ${{ github.event.client_payload.resource }}
+          VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          tmp=$(mktemp)
+          jq --arg r "$RESOURCE" --arg v "$VERSION" \
+            '. + {($r): $v}' versions.json > "$tmp"
+          mv "$tmp" versions.json
+
+      - name: Commit and push
+        env:
+          RESOURCE: ${{ github.event.client_payload.resource }}
+          VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          git config user.name "Version Bumper"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add versions.json
+          if git diff --cached --quiet; then
+            echo "no change for $RESOURCE@$VERSION"
+            exit 0
+          fi
+          git commit -m "bump $RESOURCE to $VERSION"
+          git push
